@@ -1,8 +1,10 @@
+cmdstanpy
 duckdb
 pandas
 plotly
 polars
-prophet
+prophet==1.3.0
+python-dateutil
 requests
 statsmodels
 streamlit
