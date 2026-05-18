@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import datetime
+from pathlib import Path
 from dateutil.relativedelta import relativedelta
 from src.redfin import redfin_housing_market_tracker_extract, redfin_housing_market_tracker_transform
 from src.zillow import zillow_price_cut_extract
@@ -101,6 +102,36 @@ with col2:
 with col3:
     if pc_now:
         st.metric("Price cut rate", f"{pc_now:.1f}%", delta=f"{pc_now - pc_prior:+.1f}pp vs 12 months ago" if pc_prior else None, delta_color="inverse")
+
+st.divider()
+
+# ── Prediction + validation log ──────────────────────────────────────────────
+st.header("3-month prediction")
+
+_log_path = Path("data/processed/prediction_log.csv")
+if _log_path.exists():
+    _log = pd.read_csv(_log_path, parse_dates=["logged_at", "data_through", "forecast_month"])
+    _latest = _log.sort_values("logged_at").iloc[-1]
+    _fm = pd.Timestamp(_latest["forecast_month"]).strftime("%B %Y")
+    _pred = _latest["predicted_avg"]
+    _pred_label = "seller's market" if _pred >= 60 else "buyer's market" if _pred <= 40 else "balanced territory"
+    st.markdown(
+        f"As of **{data_through.strftime('%B %Y')}**, the model expects the metro average to reach "
+        f"**{_pred:.0f}** by **{_fm}** — {_pred_label}."
+    )
+
+    if _log["actual_avg"].notna().any():
+        st.markdown("**Past predictions vs actuals**")
+        _validated = _log[_log["actual_avg"].notna()].copy()
+        _validated["Error"] = (_validated["actual_avg"] - _validated["predicted_avg"]).map("{:+.1f}".format)
+        _validated["Predicted"] = _validated["predicted_avg"].map("{:.0f}".format)
+        _validated["Actual"] = _validated["actual_avg"].map("{:.0f}".format)
+        _validated["For month"] = _validated["forecast_month"].dt.strftime("%b %Y")
+        _validated["Data as of"] = _validated["data_through"].dt.strftime("%b %Y")
+        st.dataframe(
+            _validated[["Data as of", "For month", "Predicted", "Actual", "Error"]],
+            hide_index=True, use_container_width=True,
+        )
 
 st.divider()
 
