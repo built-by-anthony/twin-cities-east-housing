@@ -215,7 +215,7 @@ with tab_score:
 The average score across all cities is {avg_now:.0f} — {delta_phrase} from a year ago.
 **{hottest['region_name']}** ({hottest['market_score']:.0f}) is the strongest seller's market right now;
 **{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}{_pred_sentence}
-See the [Market Summary](?page=market_summary) page for a full breakdown.
+See the [Market Summary](/market_summary) page for a full breakdown.
 """)
 
 # ── Tab 2: Underlying Data ───────────────────────────────────────────────────
