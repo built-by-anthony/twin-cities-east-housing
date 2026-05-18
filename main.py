@@ -1,0 +1,6 @@
+import polars as pl
+from src.redfin import redfin_housing_market_tracker_extract,  redfin_housing_market_tracker_transform, redfin_housing_market_tracker_load
+
+redfin_df = redfin_housing_market_tracker_extract()
+redfin_df = redfin_housing_market_tracker_transform(redfin_df)
+redfin_housing_market_tracker_load(redfin_df)
