@@ -1,6 +1,10 @@
+.gitignore
 .venv/
 data/housing.duckdb
 __pycache__/
 *.pyc
 .DS_Store
 memory/
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
