@@ -178,9 +178,9 @@ with tab_score:
     from dateutil.relativedelta import relativedelta as rd
 
     latest_month  = scores_df["period_begin"].max()
-    six_ago       = latest_month - rd(months=6)
+    twelve_ago    = latest_month - rd(months=12)
     avg_now       = scores_df.filter(pl.col("period_begin") == latest_month)["market_score"].mean()
-    avg_prior_df  = scores_df.filter(pl.col("period_begin") == six_ago)["market_score"]
+    avg_prior_df  = scores_df.filter(pl.col("period_begin") == twelve_ago)["market_score"]
     avg_prior     = avg_prior_df.mean() if len(avg_prior_df) > 0 else avg_now
     delta         = avg_now - avg_prior
 
@@ -196,7 +196,7 @@ with tab_score:
 
     st.markdown(f"""
 **What the data is saying as of {latest_month.strftime('%B %Y')}:** The East Metro is **{direction}**.
-The average score across all cities is {avg_now:.0f} — {delta_phrase} from six months ago.
+The average score across all cities is {avg_now:.0f} — {delta_phrase} from a year ago.
 **{hottest['region_name']}** ({hottest['market_score']:.0f}) is the strongest seller's market right now;
 **{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}
 See the [Market Summary](?page=market_summary) page for a full breakdown.

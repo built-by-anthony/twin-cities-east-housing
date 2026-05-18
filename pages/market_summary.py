@@ -42,11 +42,11 @@ latest_month    = scores_df["period_begin"].max()
 six_months_ago  = latest_month - relativedelta(months=6)
 twelve_months_ago = latest_month - relativedelta(months=12)
 
-latest_scores = scores_df.filter(pl.col("period_begin") == latest_month)
-prior_6_scores = scores_df.filter(pl.col("period_begin") == six_months_ago)
+latest_scores  = scores_df.filter(pl.col("period_begin") == latest_month)
+prior_12_scores = scores_df.filter(pl.col("period_begin") == twelve_months_ago)
 
 avg_now   = latest_scores["market_score"].mean()
-avg_prior = prior_6_scores["market_score"].mean() if len(prior_6_scores) > 0 else avg_now
+avg_prior = prior_12_scores["market_score"].mean() if len(prior_12_scores) > 0 else avg_now
 delta     = avg_now - avg_prior
 
 hottest = latest_scores.sort("market_score", descending=True).row(0, named=True)
@@ -58,7 +58,7 @@ pc_now   = pc_now_df["price_cut_pct"][0] if len(pc_now_df) > 0 else None
 pc_prior = pc_prior_df["price_cut_pct"][0] if len(pc_prior_df) > 0 else None
 
 dom_now   = redfin_df.filter(pl.col("period_begin") == latest_month)["median_days_on_market"].mean()
-dom_prior = redfin_df.filter(pl.col("period_begin") == six_months_ago)["median_days_on_market"].mean()
+dom_prior = redfin_df.filter(pl.col("period_begin") == twelve_months_ago)["median_days_on_market"].mean()
 
 mos_df = redfin_df.with_columns(
     (pl.col("active_listings").cast(pl.Float64) / pl.col("homes_sold").cast(pl.Float64)).alias("mos")
@@ -86,7 +86,7 @@ mkt_label   = "a seller's market" if avg_now >= 60 else "a buyer's market" if av
 pc_sentence = f" {pc_now:.0f}% of metro listings are carrying a price cut" + (f", up {pc_now-pc_prior:.0f}pp from a year ago" if pc_prior else "") + "." if pc_now else ""
 
 st.markdown(f"""
-The East Metro is **{direction}**. The average market score is **{avg_now:.0f}** ({delta_str} from 6 months ago),
+The East Metro is **{direction}**. The average market score is **{avg_now:.0f}** ({delta_str} vs a year ago),
 putting the metro in **{mkt_label}** on the whole. **{hottest['region_name']}** ({hottest['market_score']:.0f})
 leads as the strongest seller's market; **{coolest['region_name']}** ({coolest['market_score']:.0f}) is
 the softest.{pc_sentence}
@@ -94,9 +94,9 @@ the softest.{pc_sentence}
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Avg market score", f"{avg_now:.0f}", delta=f"{delta:+.0f} vs 6 months ago", delta_color="off")
+    st.metric("Avg market score", f"{avg_now:.0f}", delta=f"{delta:+.0f} vs 1 year ago", delta_color="off")
 with col2:
-    st.metric("Avg days on market", f"{dom_now:.0f} days", delta=f"{dom_now - dom_prior:+.0f} vs 6 months ago", delta_color="inverse")
+    st.metric("Avg days on market", f"{dom_now:.0f} days", delta=f"{dom_now - dom_prior:+.0f} vs 1 year ago", delta_color="inverse")
 with col3:
     if pc_now:
         st.metric("Price cut rate", f"{pc_now:.1f}%", delta=f"{pc_now - pc_prior:+.1f}pp vs 12 months ago" if pc_prior else None, delta_color="inverse")
@@ -150,13 +150,13 @@ st.header("City breakdown")
 
 rows = []
 for row in latest_scores.sort("market_score", descending=True).iter_rows(named=True):
-    prior = prior_6_scores.filter(pl.col("region_name") == row["region_name"])
+    prior = prior_12_scores.filter(pl.col("region_name") == row["region_name"])
     prior_score = prior["market_score"][0] if len(prior) > 0 else None
     change = row["market_score"] - prior_score if prior_score is not None else None
     rows.append({
         "City": row["region_name"],
         "Score": f"{row['market_score']:.0f}",
-        "6-mo change": f"{change:+.0f}" if change is not None else "—",
+        "1-yr change": f"{change:+.0f}" if change is not None else "—",
         "Condition": ("🔴 Seller" if row["market_score"] >= 60
                       else "🟢 Buyer" if row["market_score"] <= 40
                       else "⚪ Balanced"),
