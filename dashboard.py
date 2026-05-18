@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import polars as pl
+from pathlib import Path
 from src.redfin import redfin_housing_market_tracker_extract, redfin_housing_market_tracker_transform
 from src.zillow import zillow_zhvi_extract, zillow_zhvi_transform
 from src.market_score import compute_market_score
@@ -28,7 +29,15 @@ COLORS = [
 
 CHART_DEFAULTS = dict(template="plotly_dark", color_discrete_sequence=COLORS)
 
-st.title("Twin Cities East Metro — Housing Market")
+col_title, col_updated = st.columns([4, 1])
+with col_title:
+    st.title("Twin Cities East Metro — Housing Market")
+with col_updated:
+    redfin_mtime = Path("data/processed/redfin.csv").stat().st_mtime
+    import datetime
+    last_updated = datetime.datetime.fromtimestamp(redfin_mtime).strftime("%b %d, %Y")
+    st.markdown(f"<p style='text-align:right; color:#666; padding-top:1.2rem;'>Data updated {last_updated}</p>", unsafe_allow_html=True)
+
 st.info(
     "⚠️ **Work in progress.** This dashboard is actively being developed and the methodology "
     "behind the market score is evolving. If you work in real estate or have domain expertise, "
@@ -145,7 +154,14 @@ col3, col4 = st.columns(2)
 
 with col3:
     st.subheader("Inventory — New vs Active Listings")
-    fig = px.line(redfin_pd, x="period_begin", y="new_listings", color="region_name", labels={"new_listings": "New Listings", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    # Melt both listing columns so they appear as separate series on one chart
+    inventory_pd = redfin_pd[["period_begin", "region_name", "new_listings", "active_listings"]].melt(
+        id_vars=["period_begin", "region_name"], var_name="type", value_name="count"
+    )
+    inventory_pd["type"] = inventory_pd["type"].map({"new_listings": "New", "active_listings": "Active"})
+    fig = px.line(inventory_pd, x="period_begin", y="count", color="region_name", line_dash="type",
+        labels={"count": "Listings", "period_begin": "", "region_name": "City", "type": ""},
+        **CHART_DEFAULTS)
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, width="stretch")
 
@@ -170,3 +186,12 @@ with col6:
     fig = px.line(redfin_pd, x="period_begin", y="share_sold_above_list", color="region_name", labels={"share_sold_above_list": "% Above List", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, width="stretch")
+
+st.divider()
+st.markdown(
+    "<p style='color:#555; font-size:0.8rem;'>Data sourced from "
+    "<a href='https://www.redfin.com/news/data-center/' style='color:#666;'>Redfin Data Center</a> and "
+    "<a href='https://www.zillow.com/research/data/' style='color:#666;'>Zillow Research</a>. "
+    "Not financial or real estate advice.</p>",
+    unsafe_allow_html=True
+)
