@@ -59,7 +59,6 @@ def redfin_housing_market_tracker_transform(redfin_df: pl.DataFrame) -> pl.DataF
         "region_type",
         "frequency",
         "last_updated",
-        "period_end"
     ])
 
     # Normalize city names to match Zillow format — strip state suffix and align spelling

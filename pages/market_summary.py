@@ -41,6 +41,7 @@ redfin_df, scores_df, price_cut_df = load_data()
 latest_month    = scores_df["period_begin"].max()
 six_months_ago  = latest_month - relativedelta(months=6)
 twelve_months_ago = latest_month - relativedelta(months=12)
+data_through    = redfin_df["period_end"].max()
 
 latest_scores  = scores_df.filter(pl.col("period_begin") == latest_month)
 prior_12_scores = scores_df.filter(pl.col("period_begin") == twelve_months_ago)
@@ -71,7 +72,7 @@ mos_prior = mos_df.filter(pl.col("period_begin") == six_months_ago)["mos"].mean(
 st.title("Market Summary")
 st.markdown(
     f"<p style='color:#666; font-size:0.9rem;'>Historical analysis and current conditions — "
-    f"as of {latest_month.strftime('%B %Y')}</p>",
+    f"as of {data_through.strftime('%B %Y')}</p>",
     unsafe_allow_html=True,
 )
 

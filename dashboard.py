@@ -68,6 +68,10 @@ redfin_df, zillow_df, scores_df, price_cut_df = load_data()
 
 all_cities = sorted(zillow_df["region_name"].unique().to_list())
 
+# period_end is the last day of the rolling 3-month window — use this for display labels
+# so we show "April 2026" rather than the window-start "February 2026"
+data_through = redfin_df["period_end"].max()
+
 redfin_pd = redfin_df.sort("period_begin").to_pandas()
 zillow_pd = zillow_df.sort("date").to_pandas()
 scores_pd = scores_df.sort("period_begin").to_pandas()
@@ -195,7 +199,7 @@ with tab_score:
     pc_phrase     = f" {pc_now:.0f}% of listings metro-wide are carrying price cuts." if pc_now else ""
 
     st.markdown(f"""
-**What the data is saying as of {latest_month.strftime('%B %Y')}:** The East Metro is **{direction}**.
+**What the data is saying as of {data_through.strftime('%B %Y')}:** The East Metro is **{direction}**.
 The average score across all cities is {avg_now:.0f} — {delta_phrase} from a year ago.
 **{hottest['region_name']}** ({hottest['market_score']:.0f}) is the strongest seller's market right now;
 **{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}
