@@ -62,6 +62,13 @@ def redfin_housing_market_tracker_transform(redfin_df: pl.DataFrame) -> pl.DataF
         "period_end"
     ])
 
+    # Normalize city names to match Zillow format — strip state suffix and align spelling
+    redfin_df = redfin_df.with_columns(
+        pl.col("region_name")
+          .str.replace(", MN", "")
+          .str.replace("North St. Paul", "North Saint Paul")
+    )
+
     return redfin_df
 
 def redfin_housing_market_tracker_load(df):
