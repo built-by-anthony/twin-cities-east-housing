@@ -6,7 +6,7 @@ import pandas as pd
 import datetime
 from pathlib import Path
 from src.redfin import redfin_housing_market_tracker_extract, redfin_housing_market_tracker_transform
-from src.zillow import zillow_zhvi_extract, zillow_zhvi_transform
+from src.zillow import zillow_zhvi_extract, zillow_zhvi_transform, zillow_price_cut_extract
 from src.market_score import compute_market_score
 from src.forecast import forecast_market_score
 
@@ -55,15 +55,16 @@ st.info(
 def load_data():
     redfin = redfin_housing_market_tracker_transform(redfin_housing_market_tracker_extract())
     zillow = zillow_zhvi_transform(zillow_zhvi_extract())
-    scores = compute_market_score(redfin)
-    return redfin, zillow, scores
+    price_cut = zillow_price_cut_extract()
+    scores = compute_market_score(redfin, price_cut)
+    return redfin, zillow, scores, price_cut
 
 # Forecast is cached separately — fitting 11 Prophet models takes ~10s
 @st.cache_data
 def load_forecast(scores_df, months_ahead=12):
     return forecast_market_score(scores_df, months_ahead=months_ahead)
 
-redfin_df, zillow_df, scores_df = load_data()
+redfin_df, zillow_df, scores_df, price_cut_df = load_data()
 
 all_cities = sorted(zillow_df["region_name"].unique().to_list())
 
@@ -91,15 +92,16 @@ with tab_score:
         The market score is a composite index from **0 (strong buyer's market) to 100 (strong seller's market)**.
         A score near 50 indicates a balanced market.
 
-        It combines five signals from the Redfin data:
+        It combines six signals from Redfin and Zillow data:
 
         | Signal | Weight | Seller-friendly when... |
         |---|---|---|
-        | Avg sale-to-list ratio | 25% | Homes sell at or above asking price |
-        | % sold above list price | 25% | More homes close in bidding wars |
+        | Avg sale-to-list ratio | 20% | Homes sell at or above asking price |
+        | % sold above list price | 20% | More homes close in bidding wars |
         | Median days on market | 20% | Homes move quickly |
         | Months of supply | 15% | Inventory moves fast relative to sales pace |
-        | Pending sales | 15% | More buyers are actively under contract |
+        | Pending sales | 10% | More buyers are actively under contract |
+        | % listings with price cut | 15% | Fewer sellers are cutting prices |
 
         **Normalization** uses per-city z-scores — each metric is measured relative to that city's own
         historical average. A score of 70 in Woodbury reflects the same *relative heat* as a 70 in Newport,
@@ -170,6 +172,35 @@ with tab_score:
         st.dataframe(df[["City", "Score", "Outlook"]], hide_index=True, use_container_width=True)
 
     outlook_table(3, "3 month")
+
+    # --- Market narrative ---
+    st.divider()
+    from dateutil.relativedelta import relativedelta as rd
+
+    latest_month  = scores_df["period_begin"].max()
+    six_ago       = latest_month - rd(months=6)
+    avg_now       = scores_df.filter(pl.col("period_begin") == latest_month)["market_score"].mean()
+    avg_prior_df  = scores_df.filter(pl.col("period_begin") == six_ago)["market_score"]
+    avg_prior     = avg_prior_df.mean() if len(avg_prior_df) > 0 else avg_now
+    delta         = avg_now - avg_prior
+
+    hottest = scores_df.filter(pl.col("period_begin") == latest_month).sort("market_score", descending=True).row(0, named=True)
+    coolest = scores_df.filter(pl.col("period_begin") == latest_month).sort("market_score").row(0, named=True)
+
+    pc_rows = price_cut_df.filter(pl.col("date") == latest_month)
+    pc_now  = pc_rows["price_cut_pct"][0] if len(pc_rows) > 0 else None
+
+    direction     = "cooling" if delta < -3 else "heating up" if delta > 3 else "holding steady"
+    delta_phrase  = f"down {abs(delta):.0f} points" if delta < -1 else f"up {abs(delta):.0f} points" if delta > 1 else "roughly flat"
+    pc_phrase     = f" {pc_now:.0f}% of listings metro-wide are carrying price cuts." if pc_now else ""
+
+    st.markdown(f"""
+**What the data is saying as of {latest_month.strftime('%B %Y')}:** The East Metro is **{direction}**.
+The average score across all cities is {avg_now:.0f} — {delta_phrase} from six months ago.
+**{hottest['region_name']}** ({hottest['market_score']:.0f}) is the strongest seller's market right now;
+**{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}
+See the [Market Summary](?page=market_summary) page for a full breakdown.
+""")
 
 # ── Tab 2: Underlying Data ───────────────────────────────────────────────────
 with tab_data:

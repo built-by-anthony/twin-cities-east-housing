@@ -8,12 +8,8 @@ This document tracks planned improvements to the market score model and forecast
 
 These are self-contained changes to `src/market_score.py`. The data is already in the Redfin feed.
 
-### Price Reduction Rate
-**What:** Add the percentage of active listings that have taken at least one price cut as a scored signal.
-
-**Why:** Price reductions are one of the most leading indicators available — sellers reduce price before the broader market score catches up. It's a direct measure of seller capitulation and tends to lead closed-sale metrics by 4–8 weeks.
-
-**How:** Redfin publishes `PRICE DROPS (MOM)` in the housing market tracker. Add as a 6th signal weighted ~15%, redistributed from the sale-to-list and above-list weights.
+### ~~Price Reduction Rate~~ ✅ Done
+Added as a 6th signal at 15% weight using Zillow's "Share of Listings With a Price Cut" for the Minneapolis MSA. Redfin city-level doesn't publish this metric; Zillow metro-level data goes back to 2018, giving historical context the Redfin feed lacks. Signal is metro-wide (all cities share the same monthly reading) but adds meaningful temporal variation — rising price cuts pull all scores lower, which is correct macro behavior.
 
 ---
 

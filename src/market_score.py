@@ -1,29 +1,37 @@
 import polars as pl
 
 WEIGHTS = {
-    "avg_sale_to_list_ratio": 0.25,   # higher = seller advantage
-    "share_sold_above_list":  0.25,   # higher = seller advantage
+    "avg_sale_to_list_ratio": 0.20,   # higher = seller advantage
+    "share_sold_above_list":  0.20,   # higher = seller advantage
     "median_days_on_market":  0.20,   # lower  = seller advantage (inverted below)
     "months_of_supply":       0.15,   # lower  = seller advantage (inverted below)
-    "pending_sales":          0.15,   # higher = seller advantage
+    "pending_sales":          0.10,   # higher = seller advantage
+    "price_cut_pct":          0.15,   # lower  = seller advantage (inverted below)
 }
 
-INVERT = {"median_days_on_market", "months_of_supply"}
+INVERT = {"median_days_on_market", "months_of_supply", "price_cut_pct"}
 
 Z_CLIP = 2.0  # clip z-scores beyond ±2σ before rescaling
 
 
-def compute_market_score(redfin_df: pl.DataFrame) -> pl.DataFrame:
+def compute_market_score(redfin_df: pl.DataFrame, price_cut_df: pl.DataFrame) -> pl.DataFrame:
     """
     Returns a score from 0 (strong buyer's market) to 100 (strong seller's market)
     per city per month. Each metric is z-score normalized per city so the score
     reflects heat relative to that city's own history, not cross-city inventory scale.
+
+    price_cut_df is metro-level (Minneapolis MSA) — all cities share the same monthly
+    reading, so the signal contributes temporal information (is the market cutting more
+    or less than usual?) rather than cross-city differentiation.
     """
     df = redfin_df.select([
         "region_name", "period_begin",
         "avg_sale_to_list_ratio", "share_sold_above_list",
         "median_days_on_market", "active_listings", "homes_sold", "pending_sales",
     ])
+
+    # Join metro-level price cut rate by month
+    df = df.join(price_cut_df, left_on="period_begin", right_on="date", how="left")
 
     # Months of supply normalizes inventory by sales pace — removes city-size bias
     df = df.with_columns(

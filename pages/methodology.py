@@ -25,17 +25,18 @@ in a given city right now — buyers or sellers.
 - **40–60** → Balanced. Neither side has a clear edge.
 - **Below 40** → Buyer's market. Inventory is building, homes sit longer, sellers are negotiating.
 
-The score is built from five signals pulled from Redfin's monthly city-level data:
+The score is built from six signals — five from Redfin's monthly city-level data, one from Zillow:
 """)
 
 st.markdown("""
-| Signal | Weight | What it's measuring |
-|---|---|---|
-| Average sale-to-list ratio | 25% | Are homes actually selling at asking price? Above 100% means bidding wars. |
-| % sold above list price | 25% | What share of closings involved a bidding war? |
-| Median days on market | 20% | How fast are homes moving? |
-| Months of supply | 15% | How long would it take to sell every active listing at the current sales pace? Under 3 months is hot, over 6 is slow. |
-| Pending sales | 15% | How many buyers are actively under contract right now? A leading indicator. |
+| Signal | Source | Weight | What it's measuring |
+|---|---|---|---|
+| Average sale-to-list ratio | Redfin (city) | 20% | Are homes actually selling at asking price? Above 100% means bidding wars. |
+| % sold above list price | Redfin (city) | 20% | What share of closings involved a bidding war? |
+| Median days on market | Redfin (city) | 20% | How fast are homes moving? |
+| Months of supply | Redfin (city) | 15% | How long would it take to sell every active listing at the current sales pace? Under 3 months is hot, over 6 is slow. |
+| Pending sales | Redfin (city) | 10% | How many buyers are actively under contract right now? A leading indicator. |
+| % listings with a price cut | Zillow (Minneapolis metro) | 15% | Are sellers capitulating? Rising price cuts are one of the earliest signals of a cooling market. |
 """)
 
 st.markdown("""
@@ -47,6 +48,12 @@ since contracts signed today become closed sales in 30–60 days.
 **Why months of supply instead of raw active listings?** A city like Woodbury will always have
 more active listings than Newport just because it's bigger. Months of supply normalizes for
 that by dividing active listings by the monthly sales pace, so you're comparing apples to apples.
+
+**Why is the price cut signal metro-level?** Zillow doesn't publish city-level price cut data —
+only metro. So all 11 cities share the same Minneapolis MSA reading each month. This means it
+doesn't help compare Woodbury vs Stillwater in a given month, but it does add a strong
+time-varying signal: when price cuts are rising across the metro, every city's score is pulled
+lower. That's the right behavior — a metro-wide cooling trend should affect everyone.
 """)
 
 st.divider()
