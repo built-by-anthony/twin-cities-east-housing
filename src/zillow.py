@@ -2,7 +2,7 @@ import polars as pl
 import duckdb
 
 def zillow_zhvi_extract() -> pl.DataFrame:
-    return pl.read_csv("data/raw/zillow/City_zhvi_uc_sfr_tier_0.33_0.67_sm_sa_month.csv")
+    return pl.read_csv("data/processed/zillow.csv")
 
 def zillow_zhvi_transform(df: pl.DataFrame) -> pl.DataFrame:
     id_cols = ["RegionID", "SizeRank", "RegionName", "RegionType", "StateName", "State", "Metro", "CountyName"]

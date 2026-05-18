@@ -16,7 +16,7 @@ EAST_METRO_CITIES = [
 ]  
 
 def redfin_housing_market_tracker_extract() -> pl.DataFrame:
-    return pl.read_csv("data/raw/redfin/redfin_housing_market_monthly_all_cities_2023_Jan_to_2026_Apr.csv")
+    return pl.read_csv("data/processed/redfin.csv")
 
 def redfin_housing_market_tracker_transform(redfin_df: pl.DataFrame) -> pl.DataFrame: 
     ## City Filter
