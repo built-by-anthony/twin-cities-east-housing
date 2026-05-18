@@ -1,29 +1,50 @@
 import polars as pl
 
-# Weights must sum to 1.0
 WEIGHTS = {
-    "avg_sale_to_list_ratio": 0.30,   # higher = seller advantage
-    "share_sold_above_list":  0.30,   # higher = seller advantage
-    "median_days_on_market":  0.25,   # lower  = seller advantage (inverted below)
-    "active_listings":        0.15,   # lower  = seller advantage (inverted below)
+    "avg_sale_to_list_ratio": 0.25,   # higher = seller advantage
+    "share_sold_above_list":  0.25,   # higher = seller advantage
+    "median_days_on_market":  0.20,   # lower  = seller advantage (inverted below)
+    "months_of_supply":       0.15,   # lower  = seller advantage (inverted below)
+    "pending_sales":          0.15,   # higher = seller advantage
 }
 
-INVERT = {"median_days_on_market", "active_listings"}
+INVERT = {"median_days_on_market", "months_of_supply"}
+
+Z_CLIP = 2.0  # clip z-scores beyond ±2σ before rescaling
 
 
 def compute_market_score(redfin_df: pl.DataFrame) -> pl.DataFrame:
     """
     Returns a score from 0 (strong buyer's market) to 100 (strong seller's market)
-    per city per month. Normalized globally so trends are visible over time.
+    per city per month. Each metric is z-score normalized per city so the score
+    reflects heat relative to that city's own history, not cross-city inventory scale.
     """
-    df = redfin_df.select(["region_name", "period_begin", *WEIGHTS.keys()])
+    df = redfin_df.select([
+        "region_name", "period_begin",
+        "avg_sale_to_list_ratio", "share_sold_above_list",
+        "median_days_on_market", "active_listings", "homes_sold", "pending_sales",
+    ])
 
-    # Min-max normalize each metric across all cities and time
+    # Months of supply normalizes inventory by sales pace — removes city-size bias
+    df = df.with_columns(
+        (pl.col("active_listings").cast(pl.Float64) / pl.col("homes_sold").cast(pl.Float64))
+        .alias("months_of_supply")
+    ).drop(["active_listings", "homes_sold"])
+
+    # Per-city z-score: measures each month relative to that city's own baseline
     for col in WEIGHTS:
-        min_val = df[col].min()
-        max_val = df[col].max()
-        normed = ((pl.col(col) - min_val) / (max_val - min_val)).alias(f"{col}_norm")
-        df = df.with_columns(normed)
+        df = df.with_columns(
+            ((pl.col(col) - pl.col(col).mean().over("region_name")) /
+             pl.col(col).std().over("region_name"))
+            .alias(f"{col}_z")
+        )
+
+    # Clip at ±2σ and rescale to [0, 1]
+    for col in WEIGHTS:
+        df = df.with_columns(
+            ((pl.col(f"{col}_z").clip(-Z_CLIP, Z_CLIP) + Z_CLIP) / (2 * Z_CLIP))
+            .alias(f"{col}_norm")
+        )
 
     # Invert metrics where lower raw value = seller advantage
     df = df.with_columns([
@@ -31,7 +52,6 @@ def compute_market_score(redfin_df: pl.DataFrame) -> pl.DataFrame:
         for col in INVERT
     ])
 
-    # Weighted sum scaled to 0–100
     score = sum(pl.col(f"{col}_norm") * weight for col, weight in WEIGHTS.items())
     df = df.with_columns((score * 100).round(1).alias("market_score"))
 
