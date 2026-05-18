@@ -7,7 +7,7 @@ import datetime
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
 from src.redfin import redfin_housing_market_tracker_extract, redfin_housing_market_tracker_transform
-from src.zillow import zillow_price_cut_extract
+from src.zillow import zillow_zhvi_extract, zillow_zhvi_transform, zillow_price_cut_extract
 from src.market_score import compute_market_score
 
 st.set_page_config(page_title="Market Summary — Twin Cities East Housing", layout="wide")
@@ -32,12 +32,14 @@ CHART_DEFAULTS = dict(template="plotly_dark", color_discrete_sequence=COLORS)
 @st.cache_data
 def load_data():
     redfin = redfin_housing_market_tracker_transform(redfin_housing_market_tracker_extract())
+    zillow = zillow_zhvi_transform(zillow_zhvi_extract())
     price_cut = zillow_price_cut_extract()
     scores = compute_market_score(redfin, price_cut)
-    return redfin, scores, price_cut
+    return redfin, zillow, scores, price_cut
 
 
-redfin_df, scores_df, price_cut_df = load_data()
+redfin_df, zillow_df, scores_df, price_cut_df = load_data()
+all_cities = sorted(zillow_df["region_name"].unique().to_list())
 
 latest_month    = scores_df["period_begin"].max()
 six_months_ago  = latest_month - relativedelta(months=6)
@@ -195,6 +197,72 @@ for row in latest_scores.sort("market_score", descending=True).iter_rows(named=T
     })
 
 st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+st.divider()
+
+# ── Underlying Data ──────────────────────────────────────────────────────────
+st.header("Underlying data")
+
+redfin_pd = redfin_df.sort("period_begin").to_pandas()
+zillow_pd  = zillow_df.sort("date").to_pandas()
+
+selected_cities = st.multiselect("Cities", all_cities, default=all_cities)
+rf = redfin_pd[redfin_pd["region_name"].isin(selected_cities)]
+zl = zillow_pd[zillow_pd["region_name"].isin(selected_cities)]
+
+COLORS = [
+    "#E8A838", "#5B8DB8", "#7DC383", "#D96B6B",
+    "#A78BCD", "#E8934A", "#5BB8A8", "#B8B85B",
+    "#C46BA0", "#6B8EC4", "#8EC46B"
+]
+CHART_DEFAULTS = dict(template="plotly_dark", color_discrete_sequence=COLORS)
+
+st.subheader("Home Value Index (Zillow ZHVI)")
+fig = px.line(zl, x="date", y="zhvi", color="region_name", labels={"zhvi": "ZHVI ($)", "date": "", "region_name": "City"}, **CHART_DEFAULTS)
+fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+st.plotly_chart(fig, width="stretch")
+
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("Median Sale Price")
+    fig = px.line(rf, x="period_begin", y="median_sale_price", color="region_name", labels={"median_sale_price": "Price ($)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
+with col2:
+    st.subheader("Median Days on Market")
+    fig = px.line(rf, x="period_begin", y="median_days_on_market", color="region_name", labels={"median_days_on_market": "Days", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
+
+col3, col4 = st.columns(2)
+with col3:
+    st.subheader("Inventory — New vs Active Listings")
+    inventory_pd = rf[["period_begin", "region_name", "new_listings", "active_listings"]].melt(
+        id_vars=["period_begin", "region_name"], var_name="type", value_name="count"
+    )
+    inventory_pd["type"] = inventory_pd["type"].map({"new_listings": "New", "active_listings": "Active"})
+    fig = px.line(inventory_pd, x="period_begin", y="count", color="region_name", line_dash="type",
+        labels={"count": "Listings", "period_begin": "", "region_name": "City", "type": ""},
+        **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
+with col4:
+    st.subheader("Sale-to-List Ratio (%)")
+    fig = px.line(rf, x="period_begin", y="avg_sale_to_list_ratio", color="region_name", labels={"avg_sale_to_list_ratio": "Ratio (%)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
+
+col5, col6 = st.columns(2)
+with col5:
+    st.subheader("Homes Sold")
+    fig = px.line(rf, x="period_begin", y="homes_sold", color="region_name", labels={"homes_sold": "Homes Sold", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
+with col6:
+    st.subheader("% Sold Above List Price")
+    fig = px.line(rf, x="period_begin", y="share_sold_above_list", color="region_name", labels={"share_sold_above_list": "% Above List", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, width="stretch")
 
 st.divider()
 st.markdown(
