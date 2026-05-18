@@ -16,7 +16,7 @@ EAST_METRO_CITIES = [
 ]  
 
 def redfin_housing_market_tracker_extract() -> pl.DataFrame:
-    return pl.read_csv("data/processed/redfin.csv")
+    return pl.read_csv("data/processed/redfin.csv", truncate_ragged_lines=True)
 
 def redfin_housing_market_tracker_transform(redfin_df: pl.DataFrame) -> pl.DataFrame: 
     ## City Filter

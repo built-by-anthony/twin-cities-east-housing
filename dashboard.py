@@ -1,10 +1,14 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import polars as pl
+import pandas as pd
+import datetime
 from pathlib import Path
 from src.redfin import redfin_housing_market_tracker_extract, redfin_housing_market_tracker_transform
 from src.zillow import zillow_zhvi_extract, zillow_zhvi_transform
 from src.market_score import compute_market_score
+from src.forecast import forecast_market_score
 
 st.set_page_config(page_title="Twin Cities East Housing", layout="wide")
 
@@ -34,7 +38,6 @@ with col_title:
     st.title("Twin Cities East Metro — Housing Market")
 with col_updated:
     redfin_mtime = Path("data/processed/redfin.csv").stat().st_mtime
-    import datetime
     last_updated = datetime.datetime.fromtimestamp(redfin_mtime).strftime("%b %d, %Y")
     st.markdown(f"<p style='text-align:right; color:#666; padding-top:1.2rem;'>Data updated {last_updated}</p>", unsafe_allow_html=True)
 
@@ -55,137 +58,178 @@ def load_data():
     scores = compute_market_score(redfin)
     return redfin, zillow, scores
 
+# Forecast is cached separately — fitting 11 Prophet models takes ~10s
+@st.cache_data
+def load_forecast(scores_df, months_ahead=12):
+    return forecast_market_score(scores_df, months_ahead=months_ahead)
+
 redfin_df, zillow_df, scores_df = load_data()
 
-# Sidebar city filter — defaults to all cities selected
 all_cities = sorted(zillow_df["region_name"].unique().to_list())
-selected_cities = st.sidebar.multiselect("Cities", all_cities, default=all_cities)
 
-# Apply city filter and sort by date for clean line charts
-redfin = redfin_df.filter(pl.col("region_name").is_in(selected_cities)).sort("period_begin")
-zillow = zillow_df.filter(pl.col("region_name").is_in(selected_cities)).sort("date")
-scores = scores_df.filter(pl.col("region_name").is_in(selected_cities)).sort("period_begin")
+redfin_pd = redfin_df.sort("period_begin").to_pandas()
+zillow_pd = zillow_df.sort("date").to_pandas()
+scores_pd = scores_df.sort("period_begin").to_pandas()
 
-# Plotly expects pandas DataFrames
-redfin_pd = redfin.to_pandas()
-zillow_pd = zillow.to_pandas()
-scores_pd = scores.to_pandas()
+def classify(score):
+    if score >= 60:
+        return "🔴 Seller"
+    elif score <= 40:
+        return "🟢 Buyer"
+    else:
+        return "⚪ Balanced"
 
-# --- Buyer / Seller Score ---
-# 0 = strong buyer's market, 100 = strong seller's market, 50 = neutral
-st.subheader("Market Score — Buyer vs Seller")
-with st.expander("How is this calculated?"):
-    st.markdown("""
-    The market score is a composite index from **0 (strong buyer's market) to 100 (strong seller's market)**.
-    A score near 50 indicates a balanced market.
+tab_score, tab_data = st.tabs(["Market Score", "Underlying Data"])
 
-    It combines four signals from the Redfin data, each normalized to a 0–1 scale across all cities and months in the dataset:
+# ── Tab 1: Market Score + Forecast ──────────────────────────────────────────
+with tab_score:
 
-    | Signal | Weight | Seller-friendly when... |
-    |---|---|---|
-    | Avg sale-to-list ratio | 30% | Homes sell at or above asking price |
-    | % sold above list price | 30% | More homes close in bidding wars |
-    | Median days on market | 25% | Homes move quickly |
-    | Active listings | 15% | Inventory is low |
+    from dateutil.relativedelta import relativedelta
 
-    **Normalization** uses global min/max across all cities and time periods, so scores are comparable
-    both across cities and over time — a 70 in January means the same heat as a 70 in July.
-    """)
+    with st.expander("How is this calculated?"):
+        st.markdown("""
+        The market score is a composite index from **0 (strong buyer's market) to 100 (strong seller's market)**.
+        A score near 50 indicates a balanced market.
 
-chart_col, table_col = st.columns([3, 1])
+        It combines five signals from the Redfin data:
 
-with chart_col:
-    fig = px.line(
-        scores_pd, x="period_begin", y="market_score", color="region_name",
-        labels={"market_score": "Score (0=buyer, 100=seller)", "period_begin": "", "region_name": "City"},
-        range_y=[0, 100],
-        **CHART_DEFAULTS,
+        | Signal | Weight | Seller-friendly when... |
+        |---|---|---|
+        | Avg sale-to-list ratio | 25% | Homes sell at or above asking price |
+        | % sold above list price | 25% | More homes close in bidding wars |
+        | Median days on market | 20% | Homes move quickly |
+        | Months of supply | 15% | Inventory moves fast relative to sales pace |
+        | Pending sales | 15% | More buyers are actively under contract |
+
+        **Normalization** uses per-city z-scores — each metric is measured relative to that city's own
+        historical average. A score of 70 in Woodbury reflects the same *relative heat* as a 70 in Newport,
+        regardless of their different inventory scales. Scores beyond ±2 standard deviations are clipped
+        to keep outliers from distorting the index.
+        """)
+
+    with st.spinner("Fitting forecast models..."):
+        forecast_df = load_forecast(scores_df, months_ahead=3)
+
+    forecast_cities = forecast_df
+
+    # --- Forecast line chart with city selector ---
+    st.subheader("Forecast — Next 3 Months")
+    top_3 = (
+        scores_pd.sort_values("period_begin").groupby("region_name")["market_score"].last()
+        .sort_values(ascending=False).head(3).index.tolist()
     )
-    fig.add_hline(y=50, line_dash="dash", line_color="#555", annotation_text="Neutral (50)", annotation_font_color="#888")
+    forecast_selected = st.multiselect("Select cities to compare", all_cities, default=top_3)
+
+    if forecast_selected:
+        fig = go.Figure()
+
+        for i, city in enumerate(forecast_selected):
+            color = COLORS[i % len(COLORS)]
+            # Only plot forecast rows — no historical trace
+            pred = (
+                forecast_cities[
+                    (forecast_cities["region_name"] == city) &
+                    (forecast_cities["is_forecast"])
+                ].sort_values("ds")
+            )
+            fig.add_trace(go.Scatter(
+                x=pred["ds"], y=pred["yhat"], name=city,
+                line=dict(color=color, width=2),
+            ))
+
+        today = str(datetime.date.today().replace(day=1))
+        fig.add_shape(type="line", x0=today, x1=today, y0=0, y1=100,
+                      line=dict(color="#E8A838", dash="dot", width=1))
+        this_month = datetime.date.today().strftime("%b '%y")
+        fig.add_annotation(x=today, y=95, text=this_month,
+                           font=dict(color="#E8A838", size=10), showarrow=False, xanchor="left")
+        fig.add_hline(y=50, line_dash="dash", line_color="#555",
+                      annotation_text="Neutral (50)", annotation_font_color="#888")
+        fig.update_layout(
+            template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            height=380, margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(title="Score (0=buyer, 100=seller)"),
+            xaxis_title="",
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    # --- Outlook tables side by side ---
+    def outlook_table(months, label):
+        target = pd.Timestamp(datetime.date.today().replace(day=1) + relativedelta(months=months))
+        df = (
+            forecast_cities[forecast_cities["is_forecast"]]
+            .assign(dist=lambda d: (d["ds"] - target).abs())
+            .sort_values("dist")
+            .groupby("region_name").first().reset_index()
+            [["region_name", "yhat"]]
+        )
+        df["Score"] = df["yhat"].map("{:.0f}".format)
+        df["Outlook"] = df["yhat"].apply(classify)
+        df = df.rename(columns={"region_name": "City"}).sort_values("yhat", ascending=False)
+        st.markdown(f"**{label} outlook ({target.strftime('%b \'%y')})**")
+        st.dataframe(df[["City", "Score", "Outlook"]], hide_index=True, use_container_width=True)
+
+    outlook_table(3, "3 month")
+
+# ── Tab 2: Underlying Data ───────────────────────────────────────────────────
+with tab_data:
+
+    selected_cities = st.multiselect("Cities", all_cities, default=all_cities)
+    rf = redfin_pd[redfin_pd["region_name"].isin(selected_cities)]
+    zl = zillow_pd[zillow_pd["region_name"].isin(selected_cities)]
+
+    st.subheader("Home Value Index (Zillow ZHVI)")
+    fig = px.line(zl, x="date", y="zhvi", color="region_name", labels={"zhvi": "ZHVI ($)", "date": "", "region_name": "City"}, **CHART_DEFAULTS)
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, width="stretch")
 
-with table_col:
-    # Show each city's most recent score and classify it
-    def classify(score):
-        if score >= 60:
-            return "🔴 Seller"
-        elif score <= 40:
-            return "🟢 Buyer"
-        else:
-            return "⚪ Balanced"
+    col1, col2 = st.columns(2)
 
-    latest = (
-        scores_pd.sort_values("period_begin")
-        .groupby("region_name", as_index=False)
-        .last()
-        [["region_name", "market_score"]]
-        .sort_values("market_score", ascending=False)
-    )
-    latest["Market"] = latest["market_score"].apply(classify)
-    latest = latest.rename(columns={"region_name": "City", "market_score": "Score"})
-    latest["Score"] = latest["Score"].map("{:.0f}".format)
+    with col1:
+        st.subheader("Median Sale Price")
+        fig = px.line(rf, x="period_begin", y="median_sale_price", color="region_name", labels={"median_sale_price": "Price ($)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
-    st.markdown("**Latest month**")
-    st.dataframe(latest[["City", "Score", "Market"]], hide_index=True, use_container_width=True)
+    with col2:
+        st.subheader("Median Days on Market")
+        fig = px.line(rf, x="period_begin", y="median_days_on_market", color="region_name", labels={"median_days_on_market": "Days", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
-# --- Zillow ZHVI: smoothed home value estimate per city ---
-st.subheader("Home Value Index (Zillow ZHVI)")
-fig = px.line(zillow_pd, x="date", y="zhvi", color="region_name", labels={"zhvi": "ZHVI ($)", "date": "", "region_name": "City"}, **CHART_DEFAULTS)
-fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-st.plotly_chart(fig, width="stretch")
+    col3, col4 = st.columns(2)
 
-# --- Redfin metrics: two columns per row ---
-col1, col2 = st.columns(2)
+    with col3:
+        st.subheader("Inventory — New vs Active Listings")
+        inventory_pd = rf[["period_begin", "region_name", "new_listings", "active_listings"]].melt(
+            id_vars=["period_begin", "region_name"], var_name="type", value_name="count"
+        )
+        inventory_pd["type"] = inventory_pd["type"].map({"new_listings": "New", "active_listings": "Active"})
+        fig = px.line(inventory_pd, x="period_begin", y="count", color="region_name", line_dash="type",
+            labels={"count": "Listings", "period_begin": "", "region_name": "City", "type": ""},
+            **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
-with col1:
-    st.subheader("Median Sale Price")
-    fig = px.line(redfin_pd, x="period_begin", y="median_sale_price", color="region_name", labels={"median_sale_price": "Price ($)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    with col4:
+        st.subheader("Sale-to-List Ratio (%)")
+        fig = px.line(rf, x="period_begin", y="avg_sale_to_list_ratio", color="region_name", labels={"avg_sale_to_list_ratio": "Ratio (%)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
-with col2:
-    st.subheader("Median Days on Market")
-    fig = px.line(redfin_pd, x="period_begin", y="median_days_on_market", color="region_name", labels={"median_days_on_market": "Days", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    col5, col6 = st.columns(2)
 
-col3, col4 = st.columns(2)
+    with col5:
+        st.subheader("Homes Sold")
+        fig = px.line(rf, x="period_begin", y="homes_sold", color="region_name", labels={"homes_sold": "Homes Sold", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
-with col3:
-    st.subheader("Inventory — New vs Active Listings")
-    # Melt both listing columns so they appear as separate series on one chart
-    inventory_pd = redfin_pd[["period_begin", "region_name", "new_listings", "active_listings"]].melt(
-        id_vars=["period_begin", "region_name"], var_name="type", value_name="count"
-    )
-    inventory_pd["type"] = inventory_pd["type"].map({"new_listings": "New", "active_listings": "Active"})
-    fig = px.line(inventory_pd, x="period_begin", y="count", color="region_name", line_dash="type",
-        labels={"count": "Listings", "period_begin": "", "region_name": "City", "type": ""},
-        **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
-
-with col4:
-    # Values above 100% mean homes are selling over asking price
-    st.subheader("Sale-to-List Ratio (%)")
-    fig = px.line(redfin_pd, x="period_begin", y="avg_sale_to_list_ratio", color="region_name", labels={"avg_sale_to_list_ratio": "Ratio (%)", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
-
-col5, col6 = st.columns(2)
-
-with col5:
-    st.subheader("Homes Sold")
-    fig = px.line(redfin_pd, x="period_begin", y="homes_sold", color="region_name", labels={"homes_sold": "Homes Sold", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
-
-with col6:
-    # Share of homes that closed above the original list price — a market heat indicator
-    st.subheader("% Sold Above List Price")
-    fig = px.line(redfin_pd, x="period_begin", y="share_sold_above_list", color="region_name", labels={"share_sold_above_list": "% Above List", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    with col6:
+        st.subheader("% Sold Above List Price")
+        fig = px.line(rf, x="period_begin", y="share_sold_above_list", color="region_name", labels={"share_sold_above_list": "% Above List", "period_begin": "", "region_name": "City"}, **CHART_DEFAULTS)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
 
 st.divider()
 st.markdown(
