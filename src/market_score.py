@@ -11,7 +11,8 @@ WEIGHTS = {
 
 INVERT = {"median_days_on_market", "months_of_supply", "price_cut_pct"}
 
-Z_CLIP = 2.0  # clip z-scores beyond ±2σ before rescaling
+Z_CLIP = 2.0        # clip z-scores beyond ±2σ before rescaling
+EWM_HALFLIFE = 12   # months; data 12 months ago contributes half the weight of today
 
 
 def compute_market_score(redfin_df: pl.DataFrame, price_cut_df: pl.DataFrame) -> pl.DataFrame:
@@ -39,11 +40,17 @@ def compute_market_score(redfin_df: pl.DataFrame, price_cut_df: pl.DataFrame) ->
         .alias("months_of_supply")
     ).drop(["active_listings", "homes_sold"])
 
-    # Per-city z-score: measures each month relative to that city's own baseline
+    # Sort so ewm runs in chronological order within each city group
+    df = df.sort(["region_name", "period_begin"])
+
+    # Per-city z-score using exponentially weighted mean/std: recent months anchor the
+    # baseline more than older ones, so a rate-shock era doesn't permanently depress scores.
+    # ewm_std is clipped away from zero to avoid divide-by-zero on the first observation.
     for col in WEIGHTS:
+        ew_mean = pl.col(col).ewm_mean(half_life=EWM_HALFLIFE)
+        ew_std  = pl.col(col).ewm_std(half_life=EWM_HALFLIFE).clip(lower_bound=1e-9)
         df = df.with_columns(
-            ((pl.col(col) - pl.col(col).mean().over("region_name")) /
-             pl.col(col).std().over("region_name"))
+            ((pl.col(col) - ew_mean.over("region_name")) / ew_std.over("region_name"))
             .alias(f"{col}_z")
         )
 

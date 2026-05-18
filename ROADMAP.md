@@ -13,12 +13,8 @@ Added as a 6th signal at 15% weight using Zillow's "Share of Listings With a Pri
 
 ---
 
-### Exponentially Weighted Normalization
-**What:** Replace the equal-weight historical mean/std in the per-city z-score with an exponentially weighted equivalent, so recent months carry more influence than data from 3 years ago.
-
-**Why:** The current z-score anchors every city's baseline to the 2021–2022 pandemic frenzy. That era was a structural outlier and it's pulling the historical mean upward, which makes the entire current market look like a buyer's market by comparison. Exponential weighting decays the influence of older observations and makes the score more responsive to genuine trend shifts.
-
-**How:** Replace `pl.col(col).mean().over("region_name")` with an exponentially weighted mean using a half-life of approximately 18–24 months.
+### ~~Exponentially Weighted Normalization~~ ✅ Done
+Replaced the equal-weight historical mean/std in the per-city z-score with `ewm_mean(half_life=12)` and `ewm_std(half_life=12)`. Data from 12 months ago contributes half the weight of today; 24 months ago contributes a quarter. The high-rate adjustment period (2023–2024) no longer anchors the baseline permanently — scores in balanced territory shifted up from the high 30s/low 40s into the high 40s, which more accurately reflects current conditions relative to recent norms. Rankings are unchanged.
 
 ---
 
