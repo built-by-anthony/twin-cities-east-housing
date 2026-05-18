@@ -1,6 +1,5 @@
 .gitignore
 .venv/
-data/raw/
 data/housing.duckdb
 __pycache__/
 *.pyc
