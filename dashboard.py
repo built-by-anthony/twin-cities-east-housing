@@ -198,11 +198,23 @@ with tab_score:
     delta_phrase  = f"down {abs(delta):.0f} points" if delta < -1 else f"up {abs(delta):.0f} points" if delta > 1 else "roughly flat"
     pc_phrase     = f" {pc_now:.0f}% of listings metro-wide are carrying price cuts." if pc_now else ""
 
+    _pred_sentence = ""
+    _log_path = Path("data/processed/prediction_log.csv")
+    if _log_path.exists():
+        import pandas as _pd
+        _log = _pd.read_csv(_log_path, parse_dates=["logged_at", "forecast_month"])
+        if len(_log) > 0:
+            _latest = _log.sort_values("logged_at").iloc[-1]
+            _fm = _pd.Timestamp(_latest["forecast_month"]).strftime("%B %Y")
+            _pred = _latest["predicted_avg"]
+            _pred_label = "seller's market" if _pred >= 60 else "buyer's market" if _pred <= 40 else "balanced territory"
+            _pred_sentence = f" The 3-month outlook points to a metro average of **{_pred:.0f}** by {_fm} — {_pred_label}."
+
     st.markdown(f"""
 **What the data is saying as of {data_through.strftime('%B %Y')}:** The East Metro is **{direction}**.
 The average score across all cities is {avg_now:.0f} — {delta_phrase} from a year ago.
 **{hottest['region_name']}** ({hottest['market_score']:.0f}) is the strongest seller's market right now;
-**{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}
+**{coolest['region_name']}** ({coolest['market_score']:.0f}) is the softest.{pc_phrase}{_pred_sentence}
 See the [Market Summary](?page=market_summary) page for a full breakdown.
 """)
 
